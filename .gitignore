@@ -111,6 +111,7 @@ venv.bak/
 .appdata/
 
 # Generated files
+.pandoc
 bookworm/resources/contributors.txt
 bookworm/resources/license.txt
 bookworm/resources/userguide/*/*.html

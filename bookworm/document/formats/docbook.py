@@ -1,18 +1,14 @@
 # coding: utf-8
 
 from __future__ import annotations
-import os
-import copy
-import contextlib
-import subprocess
 import dateparser
 import lxml
 from functools import cached_property
 from pathlib import Path
 from more_itertools import flatten, first as get_first_element
 from bookworm import app
-from bookworm.paths import resources_path
 from bookworm.i18n import LocaleInfo
+from bookworm.pandoc import pandoc_convert
 from bookworm.logger import logger
 from .. import (
     BookMetadata,
@@ -23,7 +19,6 @@ from .html import BaseHtmlDocument
 
 
 log = logger.getChild(__name__)
-EXPIRE_TIMEOUT = 30 * 24 * 60 * 60
 
 
 class DocbookDocument(BaseHtmlDocument):
@@ -32,12 +27,13 @@ class DocbookDocument(BaseHtmlDocument):
     format = "docbook"
     # Translators: the name of a document file format
     name = _("Docbook Document")
-    extensions = ("*.docbook",)
+    extensions = ("*.dbk", "*.docbook",)
 
     def read(self):
         self.filename = self.get_file_system_path()
         with open(self.filename, "rb") as file:
-            self.xml_tree = lxml.etree.fromstring(file.read())
+            self._raw_docbook_xml = file.read()
+            self.xml_tree = lxml.etree.fromstring(self._raw_docbook_xml)
         super().read()
 
     @cached_property
@@ -101,21 +97,8 @@ class DocbookDocument(BaseHtmlDocument):
         return self.parse_to_full_text()
 
     def _get_html_from_docbook(self):
-        xslt = lxml.etree.parse(os.fspath(self._get_xslt_resource_path()))
-        transform = lxml.etree.XSLT(xslt)
-        content_tree = transform(copy.copy(self.xml_tree))
-        block_classes = ["chapter", *[f"sect{i}" for i in range(1, 7)]]
-        span_block_elements = flatten(
-            content_tree.xpath(f"//*[@class='{blk_cls}']") for blk_cls in block_classes
+        return pandoc_convert(
+            self._raw_docbook_xml,
+            from_format='docbook',
+            to_format='html'
         )
-        for elem in span_block_elements:
-            elem.tag = "p"
-        for el in content_tree.xpath(
-            "//ns:sup", namespaces={"ns": "http://www.w3.org/1999/xhtml"}
-        ):
-            el.clear()
-        return lxml.etree.tostring(content_tree, encoding="unicode")
-
-    @staticmethod
-    def _get_xslt_resource_path():
-        return resources_path("xslt", "xhtml", "docbook.xsl")
