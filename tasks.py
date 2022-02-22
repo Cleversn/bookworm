@@ -28,6 +28,8 @@ PROJECT_ROOT = Path.cwd()
 PACKAGE_FOLDER = PROJECT_ROOT / "bookworm"
 RESOURCES_FOLDER = PACKAGE_FOLDER / "resources"
 ICON_SIZE = (256, 256)
+PANDOC_X86_URL = "https://github.com/jgm/pandoc/releases/download/2.9.2.1/pandoc-2.9.2.1-windows-i386.zip"
+PANDOC_X64_URL = "https://github.com/jgm/pandoc/releases/download/2.17.1.1/pandoc-2.17.1.1-windows-x86_64.zip"
 GUIDE_HTML_TEMPLATE = """
 <!doctype html>
   <html lang="{lang}">
@@ -79,6 +81,7 @@ def _add_envars(context):
 
     arch = app.arch
     build_folder = PROJECT_ROOT / "scripts" / "builder" / "dist" / arch / "Bookworm"
+    context["build_arch"] = arch
     context["offline_run"] = os.environ.get("BOOKWORM_BUILD_OFFLINE", "")
     context["build_folder"] = build_folder
     context["pip_timeout"], context["pip_retries"] = (
@@ -605,6 +608,45 @@ def freeze(c):
         shutil.rmtree(os.fspath(dist_info_dir))
 
 
+def download_pandoc(c, pandoc_dir):
+    import requests
+    from tqdm import tqdm
+    from bookworm.http_tools import HttpResource
+
+    if sys.platform != "win32":
+        print("Platform is not Windows. Ignoring pandoc bundling")
+        return
+    print("Downloading pandoc...")
+    download_url = PANDOC_X86_URL if c["build_arch"] == "x86" else PANDOC_X64_URL
+    resource = HttpResource(download_url).download()
+    out_buf = BytesIO()
+    with tqdm(total=100) as p_bar:
+        resource.download_to_file(
+            out_buf,
+            progress_callback=lambda progress: p_bar.update(progress.percentage),
+        )
+    pandoc_dir.mkdir(exist_ok=True)
+    with ZipFile(out_buf, "r") as archive:
+        infos = [
+            zinfo
+            for (filepath, zinfo) in archive.NameToInfo.items()
+            if filepath.lower().endswith("copyright.txt")
+            or filepath.lower().endswith("pandoc.exe")
+        ]
+        for zinfo in infos:
+            filename = Path(zinfo.filename).name
+            pandoc_dir.joinpath(filename).write_bytes(archive.read(zinfo))
+
+
+@task
+@make_env
+def bundle_pandoc(c):
+    print("Bundling pandoc...")
+    pandoc_dir = Path(c["build_folder"]) / "pandoc"
+    download_pandoc(c, pandoc_dir)
+    print("Done embedding pandoc in the final build folder")
+
+
 @task
 @make_env
 def copy_executables(c):
@@ -618,7 +660,7 @@ def copy_executables(c):
 
 @task(
     pre=(freeze,),
-    post=(copy_executables, make_installer, bundle_update),
+    post=(copy_executables, bundle_pandoc, make_installer, bundle_update),
 )
 @make_env
 def build(c):
@@ -641,7 +683,18 @@ def create_portable_copy(c):
     print(f"Portable archive created at {port_arch}.")
 
 
-@task(name="dev", pre=(install_bookworm,))
+@task
+@make_env
+def pandoc_dev_download(c):
+    if c["offline_run"]:
+        return
+    print("Getting pandoc ready for local development ...")
+    pandoc_dir = PROJECT_ROOT / ".pandoc"
+    download_pandoc(c, pandoc_dir)
+    print("Done downloading pandoc for local development")
+
+
+@task(name="dev", pre=(install_bookworm,), post=(pandoc_dev_download,))
 def prepare_dev_environment(c):
     c["BK_DEVELOPMENT"] = True
     print("\r\n🎆 Your environment is now ready for Bookworm...")

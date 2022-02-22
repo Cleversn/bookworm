@@ -7,4 +7,5 @@ packaging==21.0
 PyInstaller==4.9
 pytest==6.2.5
 pytest-xdist==2.5.0
+tqdm==4.62.3
 wheel==0.37.1
