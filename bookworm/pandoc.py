@@ -13,6 +13,7 @@ log = logger.getChild(__name__)
 PANDOC_HEAP_SIZE_IN_MB = 500
 
     
+
 def _get_pandoc_executable_path():
     if app.is_frozen:
         return app_path("pandoc", "pandoc.exe")
